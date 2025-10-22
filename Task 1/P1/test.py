@@ -88,7 +88,7 @@ model = create_model(N_STEPS, len(FEATURE_COLUMNS), loss=LOSS, units=UNITS, cell
                     dropout=DROPOUT, optimizer=OPTIMIZER, bidirectional=BIDIRECTIONAL)
 
 # load optimal model weights from results folder
-model_path = os.path.join("results", model_name) + ".h5"
+model_path = os.path.join("results", model_name) + ".weights.h5"
 model.load_weights(model_path)
 
 # evaluate the model

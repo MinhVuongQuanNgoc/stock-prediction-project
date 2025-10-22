@@ -40,10 +40,10 @@ BIDIRECTIONAL = False
 # mean absolute error loss
 # LOSS = "mae"
 # huber loss
-LOSS = "huber_loss"
+LOSS = "huber"
 OPTIMIZER = "adam"
 BATCH_SIZE = 64
-EPOCHS = 50
+EPOCHS = 25
 
 # Amazon stock market
 ticker = "AMZN"
