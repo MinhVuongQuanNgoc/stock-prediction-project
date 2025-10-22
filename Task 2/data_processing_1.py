@@ -32,10 +32,16 @@ def load_stock_data(
     os.makedirs(data_dir, exist_ok=True)
     local_path = os.path.join(data_dir, f"{ticker}_{start_date}_{end_date}.csv")
 
-    #Load or download data
+        #Load or download data
     if cache and os.path.exists(local_path):
         print(f"Data already downloaded, load that instead: {local_path}")
-        df = pd.read_csv(local_path, index_col=0)
+        # Read CSV with correct structure
+        df = pd.read_csv(local_path, skiprows=[1, 2])  # Skip Ticker and Date rows
+        df.set_index(pd.to_datetime(df.index), inplace=True)
+        
+        print("DataFrame shape:", df.shape)
+        print("Columns:", df.columns)
+        print("First few rows:", df.head())
     else:
         print(f"Downloading {ticker} data")
         df = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=False)
@@ -43,7 +49,6 @@ def load_stock_data(
 
     # Basic cleaning
     df.dropna(inplace=True)
-    df.index = pd.to_datetime(df.index)
 
     #scaling
     feature_cols = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
@@ -51,7 +56,6 @@ def load_stock_data(
     if scale:
         scaler = MinMaxScaler()
         df[feature_cols] = scaler.fit_transform(df[feature_cols])
-        print("Scaled numeric feature columns.")
 
     # Train/test split
     if split_by_date:
@@ -61,7 +65,7 @@ def load_stock_data(
     else:
         train_df, test_df = train_test_split(df, test_size=test_size, random_state=42)
 
-    print(f"Split → Train {len(train_df)} rows  |  Test {len(test_df)} rows")
+    print(f"Split -> Train {len(train_df)} rows  |  Test {len(test_df)} rows")
 
     # Save processed versions
     train_df.to_csv(os.path.join(data_dir, f"{ticker}_train.csv"))
