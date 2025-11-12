@@ -2,10 +2,10 @@
 Target features:
     Start, end date and ticker
     Automatically download from yfinance or load CSV if exists
-    Handle NaN values
+    Deal with NaN values
     Split train/test (by date or randomly)
     Optional scaling
-    Save dataset CSV locally
+    Save dataset CSV locally, read existing if already downloaded
 """
 
 import os
@@ -32,22 +32,23 @@ def load_stock_data(
     os.makedirs(data_dir, exist_ok=True)
     local_path = os.path.join(data_dir, f"{ticker}_{start_date}_{end_date}.csv")
 
-        #Load or download data
+    #Load or download data
     if cache and os.path.exists(local_path):
         print(f"Data already downloaded, load that instead: {local_path}")
-        # Read CSV with correct structure
-        df = pd.read_csv(local_path, skiprows=[1, 2])  # Skip Ticker and Date rows
-        df.set_index(pd.to_datetime(df.index), inplace=True)
-        
-        print("DataFrame shape:", df.shape)
-        print("Columns:", df.columns)
-        print("First few rows:", df.head())
+        try:
+            df = pd.read_csv(local_path, index_col="Date", parse_dates=True)
+        except Exception:
+            # fallback if file structure is unexpected (because of multi-header csv. old logic seems fine with it for some reason)
+            df = pd.read_csv(local_path, skiprows=[1, 2]) #no more NAN
+            df.columns = ["Price", "Adj Close", "Close", "High", "Low", "Open", "Volume"]
+            df.set_index(pd.to_datetime(df["Price"]), inplace=True)
+            df.drop(columns=["Price"], inplace=True)
     else:
         print(f"Downloading {ticker} data")
         df = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=False)
         df.to_csv(local_path)
 
-    # Basic cleaning
+    # Cleaning NaN value
     df.dropna(inplace=True)
 
     #scaling
@@ -75,13 +76,13 @@ def load_stock_data(
 
 
 if __name__ == "__main__":
-    #Usage example here
+    #Usage parameter here
     df, train, test, scaler = load_stock_data(
         ticker="AAPL", #select company
         start_date="2018-02-01", #start date
         end_date="2024-08-31", #end date
         split_by_date=True, #whether to split the dataset into training/testing by date
         test_size=0.2, #ratio for test data
-        scale=True 
+        scale=True #whether to scale the data or not
     )
     print(df.head())
