@@ -99,41 +99,6 @@ def plot_metric(train_metric, val_metric, title):
     plt.tight_layout()
     plt.show()
 
-def plot_candlestick_predicted(test_df, predicted_prices, n=4):
-    """Overlay predicted closing prices on a candlestick chart."""
-
-    df = test_df.copy()
-    df = df.iloc[-len(predicted_prices):]        # Align sizes
-    df['Predicted Close'] = predicted_prices
-    df.index = pd.to_datetime(df.index)
-
-    # Aggregate into multi-day candlesticks
-    df_resampled = df.resample(f'{n}D').agg({
-        'Open': 'first',
-        'High': 'max',
-        'Low': 'min',
-        'Close': 'last',
-        'Volume': 'sum',
-        'Predicted Close': 'mean'
-    }).dropna()
-
-    try:
-        add_plot = mpf.make_addplot(df_resampled['Predicted Close'], color='blue')
-    except TypeError:
-        add_plot = mpf.make_addplot(df_resampled['Predicted Close'], color='blue', width=1.2)
-
-    # Plot candlestick + prediction line
-    mpf.plot(
-        df_resampled,
-        type='candle',
-        style='yahoo',
-        title=f"Predicted Close Overlay ({n}-Day Candles)",
-        volume=True,
-        addplot=add_plot,
-        figsize=(10, 6),
-        tight_layout=True
-    )
-
 #model test
 TEST_CONFIGS = {
 
@@ -198,9 +163,10 @@ TEST_CONFIGS = {
 }
 
 
+
 if __name__ == "__main__":
     TEST_ID = 9  # Change between 1-13 to test different configurations
-    print(f"Running Test {TEST_ID}\n")
+    print(f"Running Test {TEST_ID} configuration...\n")
 
     df, train_df, test_df, scaler = load_stock_data(
         ticker="AAPL",
@@ -215,7 +181,7 @@ if __name__ == "__main__":
         X, y = [], []
         for i in range(seq_len, len(data)):
             X.append(data[i-seq_len:i])
-            y.append(data[i, 3])  # Close price
+            y.append(data[i, 3])  # Close
         return np.array(X), np.array(y)
 
     seq_len = 60
@@ -237,6 +203,6 @@ if __name__ == "__main__":
     )[:, -1]
 
     plot_metric(history.history['loss'], history.history['val_loss'], 'Total loss vs Total val loss')
-    plot_candlestick_predicted(test_df, predicted_prices, n=4)
+    #plot_candlestick_predicted(test_df, predicted_prices, n=4)
 
     print("Training complete")

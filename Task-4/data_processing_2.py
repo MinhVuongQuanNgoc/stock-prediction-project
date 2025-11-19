@@ -115,7 +115,6 @@ def plot_candlestick_chart(df: pd.DataFrame, ticker: str, n_days: int = 1):
 
 
 if __name__ == "__main__":
-    #Usage parameter here
     df, train, test, scaler = load_stock_data(
         ticker="AAPL", #select company
         start_date="2018-02-01", #start date
@@ -126,4 +125,4 @@ if __name__ == "__main__":
     )
     
     # Visualize using candlestick chart (1 candle = 5 trade days)
-    plot_candlestick_chart(df, "AAPL", n_days=10)
+    plot_candlestick_chart(df, "AAPL", n_days=20)
