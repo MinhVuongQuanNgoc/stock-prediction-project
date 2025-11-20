@@ -1,6 +1,5 @@
 """
-Task 6 – ARIMA Baseline
-Optional traditional ARIMA model for comparison.
+Task 6: ARIMA
 """
 
 import warnings

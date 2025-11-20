@@ -78,9 +78,9 @@ def load_stock_data(
 if __name__ == "__main__":
     #Usage parameter here
     df, train, test, scaler = load_stock_data(
-        ticker="AAPL", #select company
-        start_date="2018-02-01", #start date
-        end_date="2024-08-31", #end date
+        ticker="NVDA", #select company
+        start_date="2020-01-01", #start date
+        end_date="2025-7-31", #end date
         split_by_date=True, #whether to split the dataset into training/testing by date
         test_size=0.2, #ratio for test data
         scale=True #whether to scale the data or not

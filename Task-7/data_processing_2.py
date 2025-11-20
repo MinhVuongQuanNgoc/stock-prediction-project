@@ -14,6 +14,8 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.model_selection import train_test_split
 import mplfinance as mpf
 #import matplotlib as mpl
+from typing import Optional
+from google_trends import get_google_trends, aggregate_and_fill_trends, merge_trends_into_prices
 
 
 """
@@ -29,7 +31,11 @@ def load_stock_data(
     test_size: float = 0.2,
     scale: bool = True,
     cache: bool = True,
-    data_dir: str = "data"
+    data_dir: str = "data",
+    trend_keyword: Optional[str] = None,
+    trend_geo: str = "",
+    trend_fill_method: str = "ffill",
+    **kwargs
 ):
 
     # Ensure local data directory exists
@@ -43,7 +49,7 @@ def load_stock_data(
             df = pd.read_csv(local_path, index_col="Date", parse_dates=True)
         except Exception:
             # fallback if file structure is unexpected (because of multi-header csv. Not sure why this isnt a problem on Data 1)
-            df = pd.read_csv(local_path, skiprows=[1, 2]) #these two rows keep causing problems
+            df = pd.read_csv(local_path, skiprows=[1, 2]) #these two keep causing problems
             df.columns = ["Price", "Adj Close", "Close", "High", "Low", "Open", "Volume"]
             df.set_index(pd.to_datetime(df["Price"]), inplace=True)
             df.drop(columns=["Price"], inplace=True)
@@ -85,7 +91,7 @@ def load_stock_data(
 # data_2 candlestick
 """
 def plot_candlestick_chart(df: pd.DataFrame, ticker: str, n_days: int = 1):
-    # Make sure the index is in datetime format
+    # Make sure the index is in datetime format (required by mplfinance)
     if not isinstance(df.index, pd.DatetimeIndex):
         df.index = pd.to_datetime(df.index)
 
@@ -105,7 +111,7 @@ def plot_candlestick_chart(df: pd.DataFrame, ticker: str, n_days: int = 1):
     mpf.plot(
         df,
         type='candle', # candlestick style
-        style='yahoo',
+        style='yahoo', # Visual style replicate yahoo finance style
         title=f"{ticker} Candlestick Chart ({n_days}-Day Candles)",
         volume=True, # Include volume subplot
         mav=(5, 10, 20), # 5, 10, 20 days moving averages
@@ -117,13 +123,13 @@ def plot_candlestick_chart(df: pd.DataFrame, ticker: str, n_days: int = 1):
 if __name__ == "__main__":
     #Usage parameter here
     df, train, test, scaler = load_stock_data(
-        ticker="NVDA", #select company
-        start_date="2020-01-01", #start date
-        end_date="2025-7-31", #end date
+        ticker="AAPL", #select company
+        start_date="2018-02-01", #start date
+        end_date="2024-08-31", #end date
         split_by_date=True, #whether to split the dataset into training/testing by date
         test_size=0.2, #ratio for test data
         scale=False #whether to scale the data or not
     )
     
     # Visualize using candlestick chart (1 candle = 5 trade days)
-    plot_candlestick_chart(df, "NVDA", n_days=30)
+    plot_candlestick_chart(df, "AAPL", n_days=10)

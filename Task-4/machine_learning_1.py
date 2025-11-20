@@ -118,7 +118,7 @@ def plot_candlestick_predicted(test_df, predicted_prices, n=4):
     }).dropna()
 
     try:
-        add_plot = mpf.make_addplot(df_resampled['Predicted Close'], color='blue')
+        add_plot = mpf.make_addplot(df_resampled['Predicted Close'], color='blue',label='Predicted Close')
     except TypeError:
         add_plot = mpf.make_addplot(df_resampled['Predicted Close'], color='blue', width=1.2)
 
@@ -137,48 +137,48 @@ def plot_candlestick_predicted(test_df, predicted_prices, n=4):
 #model test
 TEST_CONFIGS = {
 
-    1: [
+    1: [# Mix LSTM, GRU, RNN, diffrent activation methods
         {'type': 'LSTM', 'units': 120, 'return_sequences': True, 'dropout': 0.25, 'activation': 'tanh'},
         {'type': 'LSTM', 'units': 100, 'return_sequences': True, 'dropout': 0.25},
         {'type': 'GRU', 'units': 80, 'return_sequences': True, 'dropout': 0.25},
         {'type': 'RNN', 'units': 60, 'return_sequences': True, 'dropout': 0.25, 'activation': 'relu'},
         {'type': 'LSTM', 'units': 40, 'return_sequences': False, 'dropout': 0.25},
     ],
-    2: [
+    2: [# Simple LSTM Model
         {'type': 'LSTM', 'units': 50, 'return_sequences': True, 'dropout': 0.2},
         {'type': 'LSTM', 'units': 50, 'return_sequences': False, 'dropout': 0.2},
     ],
-    3: [
+    3: [# Simple GRU Model 
         {'type': 'GRU', 'units': 100, 'return_sequences': True, 'dropout': 0.2},
         {'type': 'GRU', 'units': 100, 'return_sequences': False, 'dropout': 0.2},
     ],
-    4: [
+    4: [#Complex GRU Model
         {'type': 'GRU', 'units': 128, 'return_sequences': True, 'dropout': 0.3},
         {'type': 'GRU', 'units': 64, 'return_sequences': True, 'dropout': 0.3},
         {'type': 'GRU', 'units': 64, 'return_sequences': False, 'dropout': 0.2},
     ],
-    5: [
+    5: [# Mixed LSTM and GRU Model
         {'type': 'LSTM', 'units': 100, 'return_sequences': True, 'dropout': 0.3},
         {'type': 'GRU', 'units': 50, 'return_sequences': False, 'dropout': 0.3},
     ],
-    6: [
+    6: [# Deep LSTM with more Units Model
         {'type': 'LSTM', 'units': 128, 'return_sequences': True, 'dropout': 0.3},
         {'type': 'LSTM', 'units': 128, 'return_sequences': True, 'dropout': 0.3},
         {'type': 'LSTM', 'units': 64, 'return_sequences': False, 'dropout': 0.3},
     ],
-    7: [
+    7: [#  LTSM Reduced Dropout Model
         {'type': 'LSTM', 'units': 64, 'return_sequences': True, 'dropout': 0.1},
         {'type': 'LSTM', 'units': 64, 'return_sequences': False, 'dropout': 0.1},
     ],
-    8: [
+    8: [# Bidirectional LSTM Configuration Model
         {'type': 'Bidirectional(LSTM)', 'units': 128, 'return_sequences': True, 'dropout': 0.3},
         {'type': 'Bidirectional(LSTM)', 'units': 64, 'return_sequences': False, 'dropout': 0.3},
     ],
-    9: [
+    9: [# Bidirectional GRU Configuration Model
         {'type': 'Bidirectional(GRU)', 'units': 128, 'return_sequences': True, 'dropout': 0.3},
         {'type': 'Bidirectional(GRU)', 'units': 64, 'return_sequences': False, 'dropout': 0.3},
     ],
-    10: [
+    10: [ # Bidirectional GRU Configuration with more layers
         {'type': 'Bidirectional(GRU)', 'units': 128, 'return_sequences': True, 'dropout': 0.3},
         {'type': 'Bidirectional(GRU)', 'units': 128, 'return_sequences': True, 'dropout': 0.3},
         {'type': 'Bidirectional(GRU)', 'units': 64, 'return_sequences': True, 'dropout': 0.2},
@@ -199,13 +199,13 @@ TEST_CONFIGS = {
 
 
 if __name__ == "__main__":
-    TEST_ID = 9  # Change between 1-13 to test different configurations
+    TEST_ID = 13  # Change between 1-13 to test different configurations
     print(f"Running Test {TEST_ID}\n")
 
     df, train_df, test_df, scaler = load_stock_data(
-        ticker="AAPL",
-        start_date="2018-02-01",
-        end_date="2024-08-31",
+        ticker="NVDA", #select company
+        start_date="2020-01-01", #start date
+        end_date="2025-7-31", #end date
         split_by_date=True,
         test_size=0.2,
         scale=True
@@ -228,7 +228,7 @@ if __name__ == "__main__":
     model = build_model(TEST_CONFIGS[TEST_ID], input_shape=input_shape)
     model.summary()
 
-    history = train_model(model, x_train, y_train, x_test, y_test, epochs=25, batch_size=32)
+    history = train_model(model, x_train, y_train, x_test, y_test, epochs=75, batch_size=32)
 
     # Predict and inverse scale
     predicted = model.predict(x_test)

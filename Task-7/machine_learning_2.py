@@ -39,7 +39,7 @@ def predict_single_day_multivariate(model, ticker: str,predict_date: str, featur
     predict_dt = datetime.strptime(predict_date, "%Y-%m-%d")
     start_dt = predict_dt - timedelta(days=730)
 
-    print(f"Preparing multivariate data from {start_dt.date()} → {predict_dt.date()}")
+    print(f"Preparing multivariate data from {start_dt.date()} -> {predict_dt.date()}")
 
     # Load abd scale using task4 preprocessing
     df, _, _, scaler = load_stock_data(
@@ -117,7 +117,8 @@ if __name__ == "__main__":
         end_date="2025-7-31", #end date
         split_by_date=True,
         test_size=0.2,
-        scale=True
+        scale=True,
+        pred_steps=10
     )
 
     feature_cols = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]

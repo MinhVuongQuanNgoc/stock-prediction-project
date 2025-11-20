@@ -17,9 +17,8 @@ from sklearn.metrics import mean_squared_error
 from statsmodels.tsa.arima.model import ARIMA
 from data_processing_2 import load_stock_data
 from machine_learning_1 import build_model, train_model
+from graph_plot import plot_predictions
 import matplotlib.pyplot as plt
-import mplfinance as mpf
-
 
 # Utility: Create DL Sequences
 def create_sequences(data, seq_len=60):
@@ -31,7 +30,7 @@ def create_sequences(data, seq_len=60):
 
 # ARIMA Model Wrapper
 def train_arima(train_close, order=(5, 1, 2)):
-    print("[ARIMA] Training...")
+    print("ARIMA Training...")
     model = ARIMA(train_close, order=order)
     model_fit = model.fit()
     return model_fit
@@ -59,13 +58,28 @@ def ensemble_predictions(pred_arima, pred_dl, pred_rf=None):
 
     return (pred_arima * 0.3) + (pred_dl * 0.5) + (pred_rf * 0.2)  # Three-model ensemble
 
+def plot_ensemble_results(dates, actual, lstm_pred, arima_pred, ensemble_pred):
+    plt.figure(figsize=(14, 7))
+    plt.plot(dates, actual, label="Actual Close")
+    plt.plot(dates, lstm_pred, label="LSTM Prediction")
+    plt.plot(dates, arima_pred, label="ARIMA Prediction")
+    plt.plot(dates, ensemble_pred, label="Ensemble Prediction", linewidth=3)
+
+    plt.title("Ensemble Model Predictions")
+    plt.xlabel("Date")
+    plt.ylabel("Price")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
 
 # Main Ensemble 
 def run_ensemble(ticker="NVDA", seq_len=60, dl_config_id=2, arima_order=(5,1,2)):
     """
     Ensemble of:
        1. ARIMA
-       2. DL(LSTM/GRU/... from machine_learning_1)
+       2. Deep-Learning (LSTM/GRU/... from machine_learning_1)
        3. Random Forest (optional)
     """
 
@@ -104,8 +118,7 @@ def run_ensemble(ticker="NVDA", seq_len=60, dl_config_id=2, arima_order=(5,1,2))
     X_test_flat = X_test.reshape((X_test.shape[0], -1))
 
     rf_model = train_random_forest(X_train_flat, y_train)
-    #pred_rf = rf_model.predict(X_test_flat)
-    pred_rf = None
+    pred_rf = rf_model.predict(X_test_flat)
 
     # Perform Ensemble
     final_pred = ensemble_predictions(pred_arima, pred_dl, pred_rf)
@@ -116,63 +129,17 @@ def run_ensemble(ticker="NVDA", seq_len=60, dl_config_id=2, arima_order=(5,1,2))
     dummy[:, 3] = final_pred
     final_inv = scaler.inverse_transform(dummy)[:, 3]
 
-    # CORRECTED: Return test_df here
-    return final_inv, y_test, history, pred_arima, pred_dl, pred_rf, test_df
-
-
-def plot_metric(train_metric, val_metric, title):
-    # ... (function body remains the same)
-    plt.show()
-
-def plot_candlestick_predicted(test_df, predicted_prices, n=4):
-    """Overlay predicted closing prices on a candlestick chart."""
-
-    df = test_df.copy()
-    df = df.iloc[-len(predicted_prices):]    # Align sizes
-    df['Predicted Close'] = predicted_prices
-    df.index = pd.to_datetime(df.index)
-
-    # Aggregate into multi-day candlesticks
-    df_resampled = df.resample(f'{n}D').agg({
-        'Open': 'first',
-        'High': 'max',
-        'Low': 'min',
-        'Close': 'last',
-        'Volume': 'sum',
-        'Predicted Close': 'last' # CORRECTED: Changed 'mean' to 'last'
-    }).dropna()
-    
-    try:
-        add_plot = mpf.make_addplot(df_resampled['Predicted Close'], color='blue',label='Predicted Close')
-    except TypeError:
-        add_plot = mpf.make_addplot(df_resampled['Predicted Close'], color='blue', width=1.2)
-
-    # Plot candlestick + prediction line
-    mpf.plot(
-        df_resampled,
-        type='candle',
-        style='yahoo',
-        title=f"Ensemble Predicted Close Overlay ({n}-Day Candles)",
-        volume=True,
-        addplot=add_plot,
-        figsize=(10, 6),
-        tight_layout=True
-    )
+    return final_inv, y_test, history, pred_arima, pred_dl, pred_rf
 
 
 if __name__ == "__main__":
-    # CORRECTED: Unpack 7 values and changed variable name for clarity
-    final_pred_inv, y_test, history, pred_arima, pred_dl, pred_rf, test_df = run_ensemble(
+    final_pred, y_test, history, pred_arima, pred_dl, pred_rf = run_ensemble(
         ticker="NVDA",
         seq_len=60,
         dl_config_id=1,
         arima_order=(5,1,2)
     )
-        
-    plot_metric(history.history['loss'], history.history['val_loss'], 'Total loss vs Total val loss')
-
-    # CORRECTED: Call the function
-    plot_candlestick_predicted(test_df, final_pred_inv, n=4) 
+    
 
     print("Ensemble Prediction Completed.")
-    print("Sample Predictions:", final_pred_inv[:5])
+    print("Sample Predictions:", final_pred[:5])
