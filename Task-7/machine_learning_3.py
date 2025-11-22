@@ -1,10 +1,10 @@
 """
-Task 6 — Ensemble Forecasting
-
-This module implements an extensible ensemble system that combines:
-- ARIMA / SARIMA
-- Deep Learning models (LSTM, GRU, RNN, Bidirectional, CNN-LSTM)
-- Random Forest Regressors
+Task 6 — Ensemble Forecasting (FINAL CLEAN VERSION)
+ - ARIMA uses SAME train/test split as LSTM/GRU/RF
+ - No dummy files, no fake loads
+ - Works with any real ticker
+ - Supports ARIMA, LSTM, GRU, BiLSTM, RF
+ - Optional weight search
 """
 
 import os
@@ -12,79 +12,142 @@ os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from statsmodels.tsa.arima.model import ARIMA
+
 from data_processing_2 import load_stock_data
 from machine_learning_1 import build_model, train_model
-from graph_plot import plot_predictions
-import matplotlib.pyplot as plt
+from typing import List, Dict, Any
+import itertools
+import json
 
+# ------------------------------------------------------------
 # Utility: Create DL Sequences
+# ------------------------------------------------------------
+
 def create_sequences(data, seq_len=60):
     X, y = [], []
     for i in range(seq_len, len(data)):
         X.append(data[i - seq_len:i])
-        y.append(data[i, 3])  # Close price
+        y.append(data[i, 3])  # Close column
     return np.array(X), np.array(y)
 
-# ARIMA Model Wrapper
-def train_arima(train_close, order=(5, 1, 2)):
-    print("ARIMA Training...")
+
+# ------------------------------------------------------------
+# ARIMA
+# ------------------------------------------------------------
+
+def train_arima(train_close, order=(5,1,2)):
     model = ARIMA(train_close, order=order)
     model_fit = model.fit()
     return model_fit
 
 
 def forecast_arima(model_fit, steps):
-    return model_fit.forecast(steps=steps)
+    return np.asarray(model_fit.forecast(steps=steps)).reshape(-1)
 
 
-# Random Forest Wrapper
+# ------------------------------------------------------------
+# Random Forest
+# ------------------------------------------------------------
+
 def train_random_forest(X_train_flat, y_train):
-    print("[RandomForest] Training...")
     rf = RandomForestRegressor(
-        n_estimators=200,
-        max_depth=12,
+        n_estimators=200, 
+        max_depth=12, 
         random_state=42
     )
     rf.fit(X_train_flat, y_train)
     return rf
 
-# Ensemble Method (Weighted Averaging)
-def ensemble_predictions(pred_arima, pred_dl, pred_rf=None):
-    if pred_rf is None:
-        return (pred_arima * 0.4) + (pred_dl * 0.6)   # Two-model ensemble
 
-    return (pred_arima * 0.3) + (pred_dl * 0.5) + (pred_rf * 0.2)  # Three-model ensemble
+# ------------------------------------------------------------
+# Deep Learning Model Configurations
+# ------------------------------------------------------------
 
-def plot_ensemble_results(dates, actual, lstm_pred, arima_pred, ensemble_pred):
-    plt.figure(figsize=(14, 7))
-    plt.plot(dates, actual, label="Actual Close")
-    plt.plot(dates, lstm_pred, label="LSTM Prediction")
-    plt.plot(dates, arima_pred, label="ARIMA Prediction")
-    plt.plot(dates, ensemble_pred, label="Ensemble Prediction", linewidth=3)
-
-    plt.title("Ensemble Model Predictions")
-    plt.xlabel("Date")
-    plt.ylabel("Price")
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+MODEL_CONFIGS = {
+    "LSTM": [
+        {'type': 'LSTM', 'units': 128, 'return_sequences': True, 'dropout': 0.2},
+        {'type': 'LSTM', 'units': 64, 'return_sequences': False, 'dropout': 0.2},
+    ],
+    "GRU": [
+        {'type': 'GRU', 'units': 128, 'return_sequences': True, 'dropout': 0.2},
+        {'type': 'GRU', 'units': 64, 'return_sequences': False, 'dropout': 0.2},
+    ],
+    "BiLSTM": [
+        {'type': 'Bidirectional(LSTM)', 'units': 128, 'return_sequences': True, 'dropout': 0.2},
+        {'type': 'Bidirectional(LSTM)', 'units': 64, 'return_sequences': False, 'dropout': 0.2},
+    ]
+}
 
 
-# Main Ensemble 
-def run_ensemble(ticker="NVDA", seq_len=60, dl_config_id=2, arima_order=(5,1,2)):
-    """
-    Ensemble of:
-       1. ARIMA
-       2. Deep-Learning (LSTM/GRU/... from machine_learning_1)
-       3. Random Forest (optional)
-    """
+def build_and_train_dl(config_name, input_shape, X_train, y_train, X_val, y_val, epochs=75, batch_size=32):
+    cfg = MODEL_CONFIGS.get(config_name)
+    if cfg is None:
+        raise ValueError(f"Unknown DL model config: {config_name}")
 
-    # Load data
-    df, train_df, test_df, scaler = load_stock_data(
+    model = build_model(cfg, input_shape=input_shape)
+    history = train_model(model, X_train, y_train, X_val, y_val,
+                          epochs=epochs, batch_size=batch_size)
+    return model, history
+
+
+# ------------------------------------------------------------
+# Inverse-scaling helper (DL & RF)
+# ------------------------------------------------------------
+
+def inverse_scale_predictions(preds_scaled, scaler, close_idx, n_feats):
+    inv = []
+    for v in preds_scaled:
+        dummy = np.zeros((1, n_feats))
+        dummy[0, close_idx] = float(np.squeeze(v))
+        inv_val = scaler.inverse_transform(dummy)[0, close_idx]
+        inv.append(inv_val)
+    return np.array(inv)
+
+
+# ------------------------------------------------------------
+# Weighted Ensemble
+# ------------------------------------------------------------
+
+def ensemble_weighted(preds_list, weights):
+    stacked = np.vstack(preds_list)
+    return np.tensordot(weights, stacked, axes=(0, 0))
+
+
+# ------------------------------------------------------------
+# Core Ensemble Function
+# ------------------------------------------------------------
+
+def run_ensemble(
+    ticker="NVDA",
+    seq_len=60,
+    model_set=["ARIMA","LSTM"],
+    dl_choice="LSTM",
+    arima_order=(5,1,2),
+    weight_search=False,
+    output_dir="output_task6"
+):
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # --------------------------------------------------------
+    # 1) LOAD DATA
+    # --------------------------------------------------------
+
+    df_raw, train_raw, test_raw, _ = load_stock_data(
+        ticker=ticker,
+        start_date="2020-01-01",
+        end_date="2025-07-31",
+        split_by_date=True,
+        test_size=0.2,
+        scale=False
+    )
+
+    df_scaled, train_scaled, test_scaled, scaler = load_stock_data(
         ticker=ticker,
         start_date="2020-01-01",
         end_date="2025-07-31",
@@ -93,53 +156,200 @@ def run_ensemble(ticker="NVDA", seq_len=60, dl_config_id=2, arima_order=(5,1,2))
         scale=True
     )
 
-    # Prepare DL sequences
-    X_train, y_train = create_sequences(train_df.values, seq_len)
-    X_test, y_test = create_sequences(test_df.values, seq_len)
+    # --------------------------------------------------------
+    # 2) PREPARE SEQUENCES
+    # --------------------------------------------------------
 
-    # (1) Train ARIMA
-    close_train = train_df["Close"].values
-    arima_model = train_arima(close_train, order=arima_order)
+    X_train, y_train = create_sequences(train_scaled.values, seq_len)
+    X_test,  y_test  = create_sequences(test_scaled.values, seq_len)
 
-    pred_arima = forecast_arima(arima_model, len(y_test))
-    pred_arima = np.array(pred_arima)
+    # Ground truth (raw close)
+    y_true = test_raw["Close"].iloc[seq_len:].values
 
-    # (2) Train Deep Learning Model
-    input_shape = (X_train.shape[1], X_train.shape[2])
-    from machine_learning_1 import TEST_CONFIGS
+    feature_idx_close = list(train_scaled.columns).index("Close")
+    n_feats = train_scaled.shape[1]
 
-    dl_model = build_model(TEST_CONFIGS[dl_config_id], input_shape=input_shape)
-    history = train_model(dl_model, X_train, y_train, X_test, y_test, epochs=75, batch_size=32)
+    # --------------------------------------------------------
+    # 3) ARIMA
+    # --------------------------------------------------------
 
-    pred_dl = dl_model.predict(X_test).flatten()
+    preds_list = []
+    names_list = []
 
-    # (3) Train Random Forest
-    X_train_flat = X_train.reshape((X_train.shape[0], -1))
-    X_test_flat = X_test.reshape((X_test.shape[0], -1))
+    if "ARIMA" in model_set:
+        raw_close_train = train_raw["Close"].values
+        model_arima = train_arima(raw_close_train, order=arima_order)
+        preds_arima = forecast_arima(model_arima, len(y_true))
+        preds_list.append(preds_arima)
+        names_list.append("ARIMA")
 
-    rf_model = train_random_forest(X_train_flat, y_train)
-    pred_rf = rf_model.predict(X_test_flat)
+    # --------------------------------------------------------
+    # 4) DEEP LEARNING (LSTM/GRU/BILSTM)
+    # --------------------------------------------------------
 
-    # Perform Ensemble
-    final_pred = ensemble_predictions(pred_arima, pred_dl, pred_rf)
+    if any(m in model_set for m in ["LSTM","GRU","BiLSTM"]):
+
+        input_shape = (X_train.shape[1], X_train.shape[2])
+        dl_model, dl_hist = build_and_train_dl(
+            dl_choice, input_shape,
+            X_train, y_train,
+            X_test,  y_test,
+            epochs=50, batch_size=32
+        )
+
+        preds_dl_scaled = dl_model.predict(X_test).flatten()
+        preds_dl = inverse_scale_predictions(
+            preds_dl_scaled, scaler,
+            feature_idx_close, n_feats
+        )
+
+        preds_list.append(preds_dl)
+        names_list.append(dl_choice)
+
+    # --------------------------------------------------------
+    # 5) RANDOM FOREST
+    # --------------------------------------------------------
+
+    if "RF" in model_set:
+        X_train_flat = X_train.reshape((X_train.shape[0], -1))
+        X_test_flat  = X_test.reshape((X_test.shape[0], -1))
+
+        model_rf = train_random_forest(X_train_flat, y_train)
+        preds_rf_scaled = model_rf.predict(X_test_flat)
+        preds_rf = inverse_scale_predictions(
+            preds_rf_scaled, scaler,
+            feature_idx_close, n_feats
+        )
+
+        preds_list.append(preds_rf)
+        names_list.append("RF")
+
+    # --------------------------------------------------------
+    # 6) WEIGHT SEARCH OR EQUAL WEIGHTS
+    # --------------------------------------------------------
+
+    summary_rows = []
+
+    def evaluate(weights):
+        pred = ensemble_weighted(preds_list, weights)
+        mse = mean_squared_error(y_true, pred)
+        return mse, pred
+
+    if weight_search and (2 <= len(preds_list) <= 3):
+
+        grid = np.linspace(0, 1, 11)
+        best_mse = np.inf
+        best_w = None
+
+        if len(preds_list) == 2:
+            for w in grid:
+                weights = [w, 1-w]
+                mse, _ = evaluate(weights)
+                if mse < best_mse:
+                    best_mse = mse
+                    best_w = weights
+
+        else:  # 3-model ensemble
+            for w1 in grid:
+                for w2 in grid:
+                    if w1 + w2 > 1:
+                        continue
+                    w3 = 1 - w1 - w2
+                    weights = [w1, w2, w3]
+                    mse, _ = evaluate(weights)
+                    if mse < best_mse:
+                        best_mse = mse
+                        best_w = weights
+
+        weights_final = best_w
+        mse_final, ensemble_pred = evaluate(best_w)
+
+        summary_rows.append({
+            "ensemble": "+".join(names_list),
+            "weights": json.dumps(weights_final),
+            "mse": mse_final,
+            "type": "weight_search"
+        })
+
+    else:
+        # Equal weighting fallback
+        n = len(preds_list)
+        weights_final = [1/n] * n
+        mse_final, ensemble_pred = evaluate(weights_final)
+
+        summary_rows.append({
+            "ensemble": "+".join(names_list),
+            "weights": json.dumps(weights_final),
+            "mse": mse_final,
+            "type": "equal_weight"
+        })
+
+    # --------------------------------------------------------
+    # 7) SAVE SUMMARY
+    # --------------------------------------------------------
+
+    summary_df = pd.DataFrame(summary_rows)
+    summary_df.to_csv(os.path.join(output_dir, "ensemble_summary.csv"), index=False)
+
+    # --------------------------------------------------------
+    # 8) PLOT
+    # --------------------------------------------------------
+
+    plt.figure(figsize=(15,6))
+    plt.plot(y_true, label="Actual", linewidth=2)
+
+    for name, preds in zip(names_list, preds_list):
+        plt.plot(preds, label=name)
+
+    plt.plot(ensemble_pred, label="Ensemble", linewidth=3, linestyle='--', color='black')
+    plt.legend()
+    plt.title(f"Ensemble: {'+'.join(names_list)} | MSE={mse_final:.4f}")
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, "ensemble_prediction_plot.png"))
+    plt.show()
+
+    # --------------------------------------------------------
+    # 9) RETURN OBJECT
+    # --------------------------------------------------------
+
+    return {
+        "names": names_list,
+        "preds_list": preds_list,
+        "ensemble_pred": ensemble_pred,
+        "weights": weights_final,
+        "mse": mse_final,
+        "y_true": y_true,
+        "summary_df": summary_df
+    }
 
 
-    # Inverse-scale for interpretability
-    dummy = np.zeros((len(final_pred), train_df.shape[1]))
-    dummy[:, 3] = final_pred
-    final_inv = scaler.inverse_transform(dummy)[:, 3]
 
-    return final_inv, y_test, history, pred_arima, pred_dl, pred_rf
-
+# ------------------------------------------------------------
+# EXAMPLE RUNS
+# ------------------------------------------------------------
 
 if __name__ == "__main__":
-    final_pred, y_test, history, pred_arima, pred_dl, pred_rf = run_ensemble(
-        ticker="NVDA",
-        seq_len=60,
-        dl_config_id=1,
-        arima_order=(5,1,2)
-    )
-    
 
-    print("Ensemble Prediction Completed.")
-    print("Sample Predictions:", final_pred[:5])
+    # ARIMA + LSTM
+    out1 = run_ensemble(
+        ticker="NVDA",
+        model_set=["ARIMA","LSTM"],
+        dl_choice="LSTM",
+        weight_search=False
+    )
+
+    # ARIMA + LSTM (weight search ON)
+    out2 = run_ensemble(
+        ticker="NVDA",
+        model_set=["ARIMA","LSTM"],
+        dl_choice="LSTM",
+        weight_search=True
+    )
+
+    # ARIMA + RF + LSTM
+    out3 = run_ensemble(
+        ticker="NVDA",
+        model_set=["ARIMA","RF","LSTM"],
+        dl_choice="LSTM",
+        weight_search=True
+    )

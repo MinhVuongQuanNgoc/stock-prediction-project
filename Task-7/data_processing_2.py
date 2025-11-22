@@ -18,6 +18,7 @@ from typing import Optional
 from google_trends import get_google_trends, aggregate_and_fill_trends, merge_trends_into_prices
 
 
+
 """
 data_1 functions start here
 """

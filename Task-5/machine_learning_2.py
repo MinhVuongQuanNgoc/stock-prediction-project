@@ -1,16 +1,23 @@
 """
-Task 5 — Multivariate and Multistep Forecasting
-Uses data preprocessing from Task-4 
+Task 5 — Multivariate and Multistep Forecasting (updated)
+Produces:
+ - multistep forecasts (k steps)
+ - per-horizon MSE table
+ - heatmap of prediction errors
+ - plot of example predicted sequences vs actual
 """
 
 import os
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
-from data_processing_2 import load_stock_data 
-from machine_learning_1 import build_model, train_model, plot_metric
+import matplotlib.pyplot as plt
 
+from datetime import datetime, timedelta
+from data_processing_2 import load_stock_data
+from machine_learning_1 import build_model, train_model, plot_metric
+from sklearn.metrics import mean_squared_error
 
 # Multi Sequence utils
 def create_multistep_sequences(df: pd.DataFrame, feature_cols: list, seq_len: int, pred_steps: int, target_col: str = "Close"):
@@ -22,65 +29,74 @@ def create_multistep_sequences(df: pd.DataFrame, feature_cols: list, seq_len: in
         y.append(arr[i:i + pred_steps, tgt_idx])
     return np.array(X), np.array(y)
 
+
 def inverse_transform_multistep(preds_scaled: np.ndarray, scaler, feature_idx: int, n_features: int):
     inv = []
+    # scaler expects shape (n_samples, n_features)
     for seq in preds_scaled:
         seq_inv = []
         for val in seq:
             dummy = np.zeros((1, n_features))
-            dummy[0, feature_idx] = val
+            dummy[0, feature_idx] = float(np.squeeze(val))
             seq_inv.append(scaler.inverse_transform(dummy)[0, feature_idx])
         inv.append(seq_inv)
     return np.array(inv)
 
-# single day prediction utility
-def predict_single_day_multivariate(model, ticker: str,predict_date: str, feature_cols: list, seq_len: int = 60, target_col: str = "Close"):
-        # Convert to datetime
-    predict_dt = datetime.strptime(predict_date, "%Y-%m-%d")
-    start_dt = predict_dt - timedelta(days=730)
 
-    print(f"Preparing multivariate data from {start_dt.date()} → {predict_dt.date()}")
-
-    # Load abd scale using task4 preprocessing
-    df, _, _, scaler = load_stock_data(
-        ticker=ticker,
-        start_date=start_dt.strftime("%Y-%m-%d"),
-        end_date=predict_dt.strftime("%Y-%m-%d"),
-        split_by_date=False,
-        scale=True
-    )
-
-    # Ensure all required features exist
-    for col in feature_cols:
-        if col not in df.columns:
-            raise ValueError(f"Missing required feature '{col}' in data.")
-
-    # Convert to scaled numpy array
-    arr = df[feature_cols].values
-
-    if len(arr) < seq_len:
-        raise ValueError(f"Not enough data rows {len(arr)} for sequence length {seq_len}")
-
-    # Create model input (last seq_len rows)
-    X_input = arr[-seq_len:]
-    X_input = np.expand_dims(X_input, axis=0)     # shape: (1, seq_len, n_features)
-
-    # Predict scaled
-    pred_scaled = model.predict(X_input)[0][0]    # model outputs 1 number
-
-    # Inverse-scale only the target feature
-    feature_idx = feature_cols.index(target_col)
-    dummy = np.zeros((1, len(feature_cols)))
-    dummy[0, feature_idx] = pred_scaled
-
-    pred_inv = scaler.inverse_transform(dummy)[0, feature_idx]
-
-    print(f"Predicted Close on {predict_date}: {pred_inv:.2f}")
-    return pred_inv
+def plot_multistep_errors(y_true_inv, y_pred_inv, pred_steps, show=True, save_path=None):
+    # y_true_inv and y_pred_inv shapes: (n_sequences, pred_steps)
+    n_steps = pred_steps
+    mse_per_step = [mean_squared_error(y_true_inv[:, i], y_pred_inv[:, i]) for i in range(n_steps)]
+    # bar plot
+    plt.figure(figsize=(8,4))
+    plt.bar(range(1, n_steps+1), mse_per_step)
+    plt.xlabel("Prediction step")
+    plt.ylabel("MSE")
+    plt.title("Multistep MSE per horizon")
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path.replace(".png","_mse_bar.png"))
+    if show:
+        plt.show()
+    return mse_per_step
 
 
-# main (format inconsistancy because i worte this later)
-def main(train_df, test_df, scaler, feature_cols, seq_len=60, pred_steps=30, target_col="Close"):
+def plot_multistep_heatmap(y_true_inv, y_pred_inv, show=True, save_path=None):
+    # compute absolute errors matrix
+    errors = np.abs(y_true_inv - y_pred_inv)
+    plt.figure(figsize=(10,6))
+    plt.imshow(errors, aspect='auto', interpolation='nearest', cmap='viridis')
+    plt.colorbar(label='Absolute error')
+    plt.xlabel('Prediction step')
+    plt.ylabel('Sequence index')
+    plt.title('Multistep absolute error heatmap')
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path.replace(".png","_heatmap.png"))
+    if show:
+        plt.show()
+
+
+def plot_sample_predictions(y_true_inv, y_pred_inv, n_examples=5, show=True, save_path=None):
+    n = min(n_examples, y_true_inv.shape[0])
+    plt.figure(figsize=(12,6))
+    for i in range(n):
+        plt.plot(range(1, y_true_inv.shape[1]+1), y_true_inv[i,:], marker='o', alpha=0.6, label=f"Actual #{i+1}" if i==0 else None, color='black' if i==0 else None)
+        plt.plot(range(1, y_pred_inv.shape[1]+1), y_pred_inv[i,:], marker='x', alpha=0.8, linestyle='--', label=f"Pred #{i+1}" if i==0 else None)
+    plt.xlabel("Step ahead")
+    plt.ylabel("Price")
+    plt.title("Sample multistep forecasts vs actual (multiple sequences)")
+    plt.legend(["Actual (example)", "Predicted (example)"])
+    plt.tight_layout()
+    if save_path:
+        plt.savefig(save_path.replace(".png","_sample_preds.png"))
+    if show:
+        plt.show()
+
+
+def main(train_df, test_df, scaler, feature_cols, seq_len=60, pred_steps=30, target_col="Close", output_dir="output_task5"):
+    os.makedirs(output_dir, exist_ok=True)
+
     X_train, y_train = create_multistep_sequences(train_df, feature_cols, seq_len, pred_steps, target_col)
     X_test, y_test = create_multistep_sequences(test_df, feature_cols, seq_len, pred_steps, target_col)
 
@@ -95,33 +111,54 @@ def main(train_df, test_df, scaler, feature_cols, seq_len=60, pred_steps=30, tar
     )
     hist = train_model(model, X_train, y_train, X_test, y_test, epochs=75, batch_size=32)
 
-    preds_scaled = model.predict(X_test)
-    preds_inv = inverse_transform_multistep(
-        preds_scaled,
-        scaler,
-        feature_idx=feature_cols.index(target_col),
-        n_features=len(feature_cols)
-    )
+    preds_scaled = model.predict(X_test)  # shape (n_sequences, pred_steps)
+    # preds_scaled shape may be (n, pred_steps) already; ensure correct shape
+    preds_scaled = np.array(preds_scaled)
+
+    # inverse transform scaled sequences to price units
+    n_features = scaler.n_features_in_ if hasattr(scaler, "n_features_in_") else len(feature_cols)
+    feature_idx = feature_cols.index(target_col)
+    preds_inv = inverse_transform_multistep(preds_scaled, scaler, feature_idx, n_features)
+
+    # true values inverse transform (they are already in scaled train/test frames? if y_test are in scaled units)
+    # Here y_test was created from test_df which is assumed already scaled (from load_stock_data with scale=True)
+    # To invert y_test to actual prices, we transform each step analogous to preds_inv:
+    y_test_inv = inverse_transform_multistep(y_test, scaler, feature_idx, n_features)
+
+    # compute per-step MSE
+    mse_per_step = [mean_squared_error(y_test_inv[:, i], preds_inv[:, i]) for i in range(pred_steps)]
+
+    # save results table
+    results_df = pd.DataFrame({
+        "step": list(range(1, pred_steps+1)),
+        "mse": mse_per_step
+    })
+    results_df.to_csv(os.path.join(output_dir, "task5_mse_per_step.csv"), index=False)
+
+    # plots
+    plot_multistep_errors(y_test_inv, preds_inv, pred_steps, show=True, save_path=os.path.join(output_dir, "task5_plots.png"))
+    plot_multistep_heatmap(y_test_inv, preds_inv, show=True, save_path=os.path.join(output_dir, "task5_plots.png"))
+    plot_sample_predictions(y_test_inv, preds_inv, n_examples=5, show=True, save_path=os.path.join(output_dir, "task5_plots.png"))
 
     plot_metric(hist.history['loss'], hist.history['val_loss'], 'Train vs Validation Loss')
-    return model, preds_inv, y_test
+
+    return model, preds_inv, y_test_inv, results_df
 
 
 if __name__ == "__main__":
-    print("Multivariate + Multistep Forecasting")
+    print("Multivariate + Multistep Forecasting (Task 5)")
 
-    # Load data
     df, train_df, test_df, scaler = load_stock_data(
-        ticker="NVDA", #select company
-        start_date="2020-01-01", #start date
-        end_date="2025-7-31", #end date
+        ticker="NVDA",
+        start_date="2020-01-01",
+        end_date="2025-07-31",
         split_by_date=True,
         test_size=0.2,
         scale=True
     )
 
     feature_cols = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
+    model, preds_inv, y_test_inv, results_df = main(train_df, test_df, scaler, feature_cols, seq_len=60, pred_steps=10)
 
-    model, preds_inv, y_test = main(train_df, test_df, scaler, feature_cols)
-
-    print(f"Produced {preds_inv.shape[0]} forecast sequences")
+    print("Produced", preds_inv.shape[0], "forecast sequences")
+    print("Per-step MSE saved to output_task5/task5_mse_per_step.csv")
