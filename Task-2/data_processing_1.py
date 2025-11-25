@@ -48,7 +48,7 @@ def load_stock_data(
         df = yf.download(ticker, start=start_date, end=end_date, progress=False, auto_adjust=False)
         df.to_csv(local_path)
 
-    # Cleaning NaN value
+    # Cleaning empty rows
     df.dropna(inplace=True)
 
     #scaling
@@ -76,7 +76,7 @@ def load_stock_data(
 
 
 if __name__ == "__main__":
-    #Usage parameter here
+    #To run, change the parameters as needed
     df, train, test, scaler = load_stock_data(
         ticker="NVDA", #select company
         start_date="2020-01-01", #start date

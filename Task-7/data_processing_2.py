@@ -119,18 +119,3 @@ def plot_candlestick_chart(df: pd.DataFrame, ticker: str, n_days: int = 1):
         figsize=(10, 6), # Figure size in inches (metrics need conversion line above)
         tight_layout=True # Avoid layout overlap
     )
-
-
-if __name__ == "__main__":
-    #Usage parameter here
-    df, train, test, scaler = load_stock_data(
-        ticker="AAPL", #select company
-        start_date="2018-02-01", #start date
-        end_date="2024-08-31", #end date
-        split_by_date=True, #whether to split the dataset into training/testing by date
-        test_size=0.2, #ratio for test data
-        scale=False #whether to scale the data or not
-    )
-    
-    # Visualize using candlestick chart (1 candle = 5 trade days)
-    plot_candlestick_chart(df, "AAPL", n_days=10)

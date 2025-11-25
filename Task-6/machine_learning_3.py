@@ -1,355 +1,385 @@
+# machine_learning_3.py
 """
-Task 6 — Ensemble Forecasting (FINAL CLEAN VERSION)
- - ARIMA uses SAME train/test split as LSTM/GRU/RF
- - No dummy files, no fake loads
- - Works with any real ticker
- - Supports ARIMA, LSTM, GRU, BiLSTM, RF
- - Optional weight search
+Task 6: Ensemble Forecasting
+Featuring:
+Auto-SARIMA (pmdarima) + DL (LSTM/GRU/BiLSTM) + RandomForest
+Multivariate input (Open,High,Low,Close,Adj Close,Volume)
+Multistep output (k days)
+Ensemble weight grid-search
+Saves summary CSV, per-horizon MSE, sample preds, and numpy arrays
 """
 
 import os
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 
+import json
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
+from typing import List, Dict, Any, Tuple
+import warnings
+warnings.filterwarnings("ignore")
 
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
-from statsmodels.tsa.arima.model import ARIMA
+from sklearn.preprocessing import MinMaxScaler
+
+# pmdarima for auto-sarima
+try:
+    import pmdarima as pm
+    PM_AVAILABLE = True
+except Exception:
+    PM_AVAILABLE = False
 
 from data_processing_2 import load_stock_data
-from machine_learning_1 import build_model, train_model
-from typing import List, Dict, Any
-import itertools
-import json
+from machine_learning_1 import build_model, train_model, plot_metric
 
-# ------------------------------------------------------------
-# Utility: Create DL Sequences
-# ------------------------------------------------------------
 
-def create_sequences(data, seq_len=60):
+# Utilities for multistep sequences
+def create_multistep_sequences(df: pd.DataFrame, feature_cols: List[str], seq_len: int, pred_steps: int, target_col: str="Close") -> Tuple[np.ndarray, np.ndarray]:
+    arr = df[feature_cols].values
+    tgt_idx = feature_cols.index(target_col)
     X, y = [], []
-    for i in range(seq_len, len(data)):
-        X.append(data[i - seq_len:i])
-        y.append(data[i, 3])  # Close column
-    return np.array(X), np.array(y)
+    for i in range(seq_len, len(arr) - pred_steps + 1):
+        X.append(arr[i - seq_len:i, :])
+        y.append(arr[i:i + pred_steps, tgt_idx])
+    return np.array(X, dtype=float), np.array(y, dtype=float)
+
+def inverse_transform_multistep(preds_scaled: np.ndarray, scaler: MinMaxScaler, feature_idx: int, n_features: int) -> np.ndarray:
+    """
+    preds_scaled: (samples, pred_steps) in scaled space
+    return: (samples, pred_steps) in raw price space
+    """
+    samples, pred_steps = preds_scaled.shape
+    flat = np.zeros((samples * pred_steps, n_features), dtype=float)
+    for i in range(samples):
+        for j in range(pred_steps):
+            flat[i*pred_steps + j, feature_idx] = float(preds_scaled[i, j])
+    inv = scaler.inverse_transform(flat)
+    inv = inv[:, feature_idx].reshape(samples, pred_steps)
+    return inv
+
+# SARIMA wrapper
+def train_sarima_auto(series: np.ndarray, max_p=3, max_q=3, max_P=2, max_Q=2, m=7, seasonal=True, maxiter=50, suppress_warnings=True):
+    if not PM_AVAILABLE:
+        print("SARIMA pmdarima not available.")
+        return None
+    try:
+        model = pm.auto_arima(
+            series,
+            start_p=0, start_q=0,
+            max_p=max_p, max_q=max_q,
+            start_P=0, start_Q=0,
+            max_P=max_P, max_Q=max_Q,
+            seasonal=seasonal, m=m,
+            stepwise=True, suppress_warnings=suppress_warnings,
+            error_action='ignore', trace=False,
+            maxiter=maxiter
+        )
+        return model
+    except Exception as e:
+        print(f"SARIMA auto_arima failed: {e}")
+        return None
+
+def forecast_sarima(model, steps: int):
+    if model is None:
+        return None
+    try:
+        f = model.predict(n_periods=steps)
+        return np.asarray(f, dtype=float).reshape(-1)
+    except Exception as e:
+        print(f"SARIMA forecast failed: {e}")
+        return None
 
 
-# ------------------------------------------------------------
-# ARIMA
-# ------------------------------------------------------------
+# Random Forest multi-step helpers
+def train_rf_multistep(X_train: np.ndarray, y_train: np.ndarray, n_estimators=150) -> List[RandomForestRegressor]:
+    pred_steps = y_train.shape[1]
+    flat_X = X_train.reshape((X_train.shape[0], -1))
+    rf_models = []
+    for step in range(pred_steps):
+        rf = RandomForestRegressor(n_estimators=n_estimators, random_state=42, n_jobs=-1)
+        rf.fit(flat_X, y_train[:, step])
+        rf_models.append(rf)
+    return rf_models
 
-def train_arima(train_close, order=(5,1,2)):
-    model = ARIMA(train_close, order=order)
-    model_fit = model.fit()
-    return model_fit
-
-
-def forecast_arima(model_fit, steps):
-    return np.asarray(model_fit.forecast(steps=steps)).reshape(-1)
-
-
-# ------------------------------------------------------------
-# Random Forest
-# ------------------------------------------------------------
-
-def train_random_forest(X_train_flat, y_train):
-    rf = RandomForestRegressor(
-        n_estimators=200, 
-        max_depth=12, 
-        random_state=42
-    )
-    rf.fit(X_train_flat, y_train)
-    return rf
+def rf_predict_multistep(rf_models: List[RandomForestRegressor], X: np.ndarray) -> np.ndarray:
+    flat = X.reshape((X.shape[0], -1))
+    preds = [m.predict(flat) for m in rf_models]
+    return np.vstack(preds).T  # (samples, pred_steps)
 
 
-# ------------------------------------------------------------
-# Deep Learning Model Configurations
-# ------------------------------------------------------------
-
+# DL builder/trainer wrapper (uses machine_learning_1.py)
 MODEL_CONFIGS = {
     "LSTM": [
-        {'type': 'LSTM', 'units': 128, 'return_sequences': True, 'dropout': 0.2},
-        {'type': 'LSTM', 'units': 64, 'return_sequences': False, 'dropout': 0.2},
+        {'type':'LSTM','units':128,'return_sequences':True,'dropout':0.2},
+        {'type':'LSTM','units':64,'return_sequences':False,'dropout':0.2},
     ],
     "GRU": [
-        {'type': 'GRU', 'units': 128, 'return_sequences': True, 'dropout': 0.2},
-        {'type': 'GRU', 'units': 64, 'return_sequences': False, 'dropout': 0.2},
+        {'type':'GRU','units':128,'return_sequences':True,'dropout':0.2},
+        {'type':'GRU','units':64,'return_sequences':False,'dropout':0.2},
     ],
     "BiLSTM": [
-        {'type': 'Bidirectional(LSTM)', 'units': 128, 'return_sequences': True, 'dropout': 0.2},
-        {'type': 'Bidirectional(LSTM)', 'units': 64, 'return_sequences': False, 'dropout': 0.2},
+        {'type':'Bidirectional(LSTM)','units':128,'return_sequences':True,'dropout':0.2},
+        {'type':'Bidirectional(LSTM)','units':64,'return_sequences':False,'dropout':0.2},
     ]
 }
 
-
-def build_and_train_dl(config_name, input_shape, X_train, y_train, X_val, y_val, epochs=75, batch_size=32):
-    cfg = MODEL_CONFIGS.get(config_name)
-    if cfg is None:
-        raise ValueError(f"Unknown DL model config: {config_name}")
-
-    model = build_model(cfg, input_shape=input_shape)
-    history = train_model(model, X_train, y_train, X_val, y_val,
-                          epochs=epochs, batch_size=batch_size)
-    return model, history
+def build_and_train_dl(config_key: str, input_shape: Tuple[int,int], output_steps: int, X_train, y_train, X_val, y_val, epochs=75, batch_size=32):
+    if config_key not in MODEL_CONFIGS:
+        raise ValueError(f"Unknown DL config: {config_key}")
+    cfg = MODEL_CONFIGS[config_key]
+    model = build_model(cfg, input_shape=input_shape, output_units=output_steps)
+    hist = train_model(model, X_train, y_train, X_val, y_val, epochs=epochs, batch_size=batch_size)
+    return model, hist
 
 
-# ------------------------------------------------------------
-# Inverse-scaling helper (DL & RF)
-# ------------------------------------------------------------
+# Ensemble utilities-
+def ensemble_weighted(preds_list: List[np.ndarray], weights: List[float]) -> np.ndarray:
+    preds_list = [np.asarray(p, dtype=float) for p in preds_list]
+    shapes = [p.shape for p in preds_list]
+    if not all(s==shapes[0] for s in shapes):
+        # align by trimming to minimum
+        min_s0 = min(s[0] for s in shapes)
+        min_s1 = min(s[1] for s in shapes)
+        preds_list = [p[:min_s0, :min_s1] for p in preds_list]
+    stacked = np.stack(preds_list, axis=0)
+    weighted = np.tensordot(weights, stacked, axes=(0,0))
+    return weighted
 
-def inverse_scale_predictions(preds_scaled, scaler, close_idx, n_feats):
-    inv = []
-    for v in preds_scaled:
-        dummy = np.zeros((1, n_feats))
-        dummy[0, close_idx] = float(np.squeeze(v))
-        inv_val = scaler.inverse_transform(dummy)[0, close_idx]
-        inv.append(inv_val)
-    return np.array(inv)
-
-
-# ------------------------------------------------------------
-# Weighted Ensemble
-# ------------------------------------------------------------
-
-def ensemble_weighted(preds_list, weights):
-    stacked = np.vstack(preds_list)
-    return np.tensordot(weights, stacked, axes=(0, 0))
-
-
-# ------------------------------------------------------------
-# Core Ensemble Function
-# ------------------------------------------------------------
 
 def run_ensemble(
-    ticker="NVDA",
-    seq_len=60,
-    model_set=["ARIMA","LSTM"],
-    dl_choice="LSTM",
-    arima_order=(5,1,2),
-    weight_search=False,
-    output_dir="output_task6"
-):
+    ticker: str = "NVDA",
+    seq_len: int = 60,
+    pred_steps: int = 10,
+    model_set: List[str] = ["SARIMA", "LSTM"],
+    dl_choice: str = "LSTM",
+    weight_search: bool = False,
+    test_size: float = 0.2,
+    start_date: str = "2020-01-01",
+    end_date: str = "2025-07-31",
+    output_dir: str = "output_ensemble",
+    dl_epochs: int = 75,
+    dl_batch_size: int = 32,
+    sarima_m: int = 7
+) -> Dict[str, Any]:
+    """
+    Runs ensemble and returns structured output.
+    model_set: any subset of ["SARIMA", "LSTM", "GRU", "BiLSTM", "RF"]
+    """
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # --------------------------------------------------------
-    # 1) LOAD DATA
-    # --------------------------------------------------------
-
+    # Load data: raw (scale=False) and scaled (if scale=True)
     df_raw, train_raw, test_raw, _ = load_stock_data(
-        ticker=ticker,
-        start_date="2020-01-01",
-        end_date="2025-07-31",
-        split_by_date=True,
-        test_size=0.2,
-        scale=False
+        ticker=ticker, start_date=start_date, end_date=end_date, split_by_date=True, test_size=test_size, scale=False
     )
-
     df_scaled, train_scaled, test_scaled, scaler = load_stock_data(
-        ticker=ticker,
-        start_date="2020-01-01",
-        end_date="2025-07-31",
-        split_by_date=True,
-        test_size=0.2,
-        scale=True
+        ticker=ticker, start_date=start_date, end_date=end_date, split_by_date=True, test_size=test_size, scale=True
     )
 
-    # --------------------------------------------------------
-    # 2) PREPARE SEQUENCES
-    # --------------------------------------------------------
+    feature_cols = list(train_scaled.columns)
+    n_features = len(feature_cols)
+    close_idx = feature_cols.index("Close")
 
-    X_train, y_train = create_sequences(train_scaled.values, seq_len)
-    X_test,  y_test  = create_sequences(test_scaled.values, seq_len)
+    # Create sequences
+    X_train, y_train = create_multistep_sequences(train_scaled, feature_cols, seq_len, pred_steps)
+    X_test,  y_test  = create_multistep_sequences(test_scaled, feature_cols, seq_len, pred_steps)
 
-    # Ground truth (raw close)
-    y_true = test_raw["Close"].iloc[seq_len:].values
+    if X_test.size == 0:
+        raise ValueError("Not enough data to create test sequences with given seq_len/pred_steps.")
 
-    feature_idx_close = list(train_scaled.columns).index("Close")
-    n_feats = train_scaled.shape[1]
+    # SARIMA: fit on raw_close_all with auto_arima (pmdarima). If fails, skip SARIMA
+    sarima_preds = None
+    if "SARIMA" in model_set:
+        raw_close_all = pd.concat([train_raw["Close"], test_raw["Close"]], axis=0).values
+        print("[SARIMA] fitting auto_arima (may take time)...")
+        sarima_model = train_sarima_auto(raw_close_all, m=sarima_m)
+        if sarima_model is None:
+            print("[SARIMA] auto_arima failed or pmdarima missing - SARIMA disabled for this run.")
+            sarima_preds = None
+        else:
+            all_preds = []
+            # rolling predictions for each valid sequence start:
+            total_seq = len(raw_close_all) - seq_len - pred_steps + 1
+            for i in range(seq_len, seq_len + (len(raw_close_all) - seq_len - pred_steps + 1)):
+                # Used the fitted model to forecast a sliding set starting at the end of train portion.
+                break
+            sarima_all = []
+            raw = raw_close_all
+            for i in range(seq_len, len(raw) - pred_steps + 1):
+                hist = raw[:i]
+                try:
+                    # fit a small auto_arima on hist
+                    m = pm.auto_arima(hist, start_p=0, start_q=0, max_p=3, max_q=3, seasonal=True, m=sarima_m,
+                                      stepwise=True, suppress_warnings=True, error_action='ignore', maxiter=20)
+                    f = m.predict(n_periods=pred_steps)
+                    sarima_all.append(np.asarray(f, dtype=float))
+                except Exception:
+                    sarima_all.append(np.asarray([hist[-1]] * pred_steps, dtype=float))
+            sarima_all = np.array(sarima_all, dtype=float)
+            n_train_seq = X_train.shape[0]
+            if sarima_all.shape[0] <= n_train_seq:
+                print("[SARIMA] Not enough rolling preds produced; disabling SARIMA.")
+                sarima_preds = None
+            else:
+                sarima_preds = sarima_all[n_train_seq:]
+                print(f"[SARIMA] produced {sarima_preds.shape[0]} test sequence forecasts.")
 
-    # --------------------------------------------------------
-    # 3) ARIMA
-    # --------------------------------------------------------
-
-    preds_list = []
-    names_list = []
-
-    if "ARIMA" in model_set:
-        raw_close_train = train_raw["Close"].values
-        model_arima = train_arima(raw_close_train, order=arima_order)
-        preds_arima = forecast_arima(model_arima, len(y_true))
-        preds_list.append(preds_arima)
-        names_list.append("ARIMA")
-
-    # --------------------------------------------------------
-    # 4) DEEP LEARNING (LSTM/GRU/BILSTM)
-    # --------------------------------------------------------
-
+    # DL model
+    dl_preds_scaled = None
+    dl_history = None
     if any(m in model_set for m in ["LSTM","GRU","BiLSTM"]):
-
+        if dl_choice not in MODEL_CONFIGS:
+            raise ValueError("dl_choice must be one of: " + ", ".join(MODEL_CONFIGS.keys()))
         input_shape = (X_train.shape[1], X_train.shape[2])
-        dl_model, dl_hist = build_and_train_dl(
-            dl_choice, input_shape,
-            X_train, y_train,
-            X_test,  y_test,
-            epochs=50, batch_size=32
-        )
+        dl_model, dl_history = build_and_train_dl(dl_choice, input_shape, pred_steps, X_train, y_train, X_test, y_test, epochs=dl_epochs, batch_size=dl_batch_size)
+        dl_preds_scaled = dl_model.predict(X_test)  # (n_test_seq, pred_steps)
 
-        preds_dl_scaled = dl_model.predict(X_test).flatten()
-        preds_dl = inverse_scale_predictions(
-            preds_dl_scaled, scaler,
-            feature_idx_close, n_feats
-        )
-
-        preds_list.append(preds_dl)
-        names_list.append(dl_choice)
-
-    # --------------------------------------------------------
-    # 5) RANDOM FOREST
-    # --------------------------------------------------------
-
+    # Random Forest
+    rf_preds_scaled = None
     if "RF" in model_set:
-        X_train_flat = X_train.reshape((X_train.shape[0], -1))
-        X_test_flat  = X_test.reshape((X_test.shape[0], -1))
+        rf_models = train_rf_multistep(X_train, y_train, n_estimators=150)
+        rf_preds_scaled = rf_predict_multistep(rf_models, X_test)
 
-        model_rf = train_random_forest(X_train_flat, y_train)
-        preds_rf_scaled = model_rf.predict(X_test_flat)
-        preds_rf = inverse_scale_predictions(
-            preds_rf_scaled, scaler,
-            feature_idx_close, n_feats
-        )
+    # Prepare components in raw price
+    preds_components = []
+    names = []
+    if sarima_preds is not None:
+        preds_components.append(np.asarray(sarima_preds, dtype=float))
+        names.append("SARIMA")
+    if dl_preds_scaled is not None:
+        preds_dl_inv = inverse_transform_multistep(np.squeeze(dl_preds_scaled), scaler, close_idx, n_features)
+        preds_components.append(np.asarray(preds_dl_inv, dtype=float))
+        names.append(dl_choice)
+    if rf_preds_scaled is not None:
+        preds_rf_inv = inverse_transform_multistep(rf_preds_scaled, scaler, close_idx, n_features)
+        preds_components.append(np.asarray(preds_rf_inv, dtype=float))
+        names.append("RF")
 
-        preds_list.append(preds_rf)
-        names_list.append("RF")
+    if len(preds_components) == 0:
+        raise ValueError("No component predictions available. Choose different models or check data.")
 
-    # --------------------------------------------------------
-    # 6) WEIGHT SEARCH OR EQUAL WEIGHTS
-    # --------------------------------------------------------
+    # Ground truth raw for test sequences
+    raw_arr = test_raw[["Open","High","Low","Close","Adj Close","Volume"]].values
+    y_true_raw = []
+    for i in range(seq_len, len(raw_arr) - pred_steps + 1):
+        y_true_raw.append(raw_arr[i:i+pred_steps, 3])
+    y_true_raw = np.array(y_true_raw, dtype=float)
 
-    summary_rows = []
+    # Align shapes to minimum
+    all_shapes = [p.shape for p in preds_components] + [y_true_raw.shape]
+    min_samples = min(s[0] for s in all_shapes)
+    min_steps = min(s[1] for s in all_shapes)
+    preds_components = [p[:min_samples, :min_steps] for p in preds_components]
+    y_true_raw = y_true_raw[:min_samples, :min_steps]
 
-    def evaluate(weights):
-        pred = ensemble_weighted(preds_list, weights)
-        mse = mean_squared_error(y_true, pred)
-        return mse, pred
+    # Weight search or equal weight
+    n_models = len(preds_components)
+    def compute_metrics(ensemble_pred, y_true):
+        per = [float(mean_squared_error(y_true[:,h], ensemble_pred[:,h])) for h in range(y_true.shape[1])]
+        return {"mse_per_horizon": per, "avg_mse": float(np.mean(per))}
 
-    if weight_search and (2 <= len(preds_list) <= 3):
-
-        grid = np.linspace(0, 1, 11)
-        best_mse = np.inf
-        best_w = None
-
-        if len(preds_list) == 2:
+    final_ensemble = None
+    best_config = None
+    results_summary = []
+    if weight_search and 2 <= n_models <= 3:
+        grid = np.linspace(0.0, 1.0, 11)
+        best_mse = np.inf; best_w = None; best_pred = None
+        if n_models == 2:
             for w in grid:
-                weights = [w, 1-w]
-                mse, _ = evaluate(weights)
-                if mse < best_mse:
-                    best_mse = mse
-                    best_w = weights
-
-        else:  # 3-model ensemble
+                weights = [w, 1.0-w]
+                ens = ensemble_weighted(preds_components, weights)
+                m = compute_metrics(ens, y_true_raw)
+                if m["avg_mse"] < best_mse:
+                    best_mse = m["avg_mse"]; best_w = weights; best_pred = ens
+        else:
             for w1 in grid:
                 for w2 in grid:
-                    if w1 + w2 > 1:
-                        continue
-                    w3 = 1 - w1 - w2
+                    if w1 + w2 > 1.0: continue
+                    w3 = 1.0 - w1 - w2
                     weights = [w1, w2, w3]
-                    mse, _ = evaluate(weights)
-                    if mse < best_mse:
-                        best_mse = mse
-                        best_w = weights
-
-        weights_final = best_w
-        mse_final, ensemble_pred = evaluate(best_w)
-
-        summary_rows.append({
-            "ensemble": "+".join(names_list),
-            "weights": json.dumps(weights_final),
-            "mse": mse_final,
-            "type": "weight_search"
-        })
-
+                    ens = ensemble_weighted(preds_components, weights)
+                    m = compute_metrics(ens, y_true_raw)
+                    if m["avg_mse"] < best_mse:
+                        best_mse = m["avg_mse"]; best_w = weights; best_pred = ens
+        if best_pred is None:
+            # fallback to equal weights
+            weights = [1.0/n_models]*n_models
+            final_ensemble = ensemble_weighted(preds_components, weights)
+            best_config = {"weights": weights, "avg_mse": compute_metrics(final_ensemble,y_true_raw)["avg_mse"]}
+            results_summary.append({"ensemble":"+".join(names),"weights":json.dumps(weights),"avg_mse":best_config["avg_mse"],"type":"fallback_equal"})
+        else:
+            final_ensemble = best_pred
+            best_config = {"weights": best_w, "avg_mse": best_mse}
+            results_summary.append({"ensemble":"+".join(names),"weights":json.dumps(best_w),"avg_mse":best_mse,"type":"weight_search"})
     else:
-        # Equal weighting fallback
-        n = len(preds_list)
-        weights_final = [1/n] * n
-        mse_final, ensemble_pred = evaluate(weights_final)
+        weights = [1.0/n_models]*n_models
+        final_ensemble = ensemble_weighted(preds_components, weights)
+        best_config = {"weights": weights, "avg_mse": compute_metrics(final_ensemble,y_true_raw)["avg_mse"]}
+        results_summary.append({"ensemble":"+".join(names),"weights":json.dumps(weights),"avg_mse":best_config["avg_mse"],"type":"equal_weight"})
 
-        summary_rows.append({
-            "ensemble": "+".join(names_list),
-            "weights": json.dumps(weights_final),
-            "mse": mse_final,
-            "type": "equal_weight"
-        })
+    # Save outputs
+    pd.DataFrame(results_summary).to_csv(os.path.join(output_dir, "ensemble_experiments_summary.csv"), index=False)
+    mse_per_horizon = [float(mean_squared_error(y_true_raw[:,h], final_ensemble[:,h])) for h in range(y_true_raw.shape[1])]
+    pd.DataFrame({"horizon": list(range(1, y_true_raw.shape[1]+1)), "mse": mse_per_horizon}).to_csv(os.path.join(output_dir, "ensemble_per_horizon_mse.csv"), index=False)
 
-    # --------------------------------------------------------
-    # 7) SAVE SUMMARY
-    # --------------------------------------------------------
+    # Save arrays
+    np.save(os.path.join(output_dir, "y_true_raw.npy"), y_true_raw)
+    np.save(os.path.join(output_dir, "final_ensemble.npy"), final_ensemble)
+    for nm, comp in zip(names, preds_components):
+        np.save(os.path.join(output_dir, f"preds_{nm}.npy"), comp)
 
-    summary_df = pd.DataFrame(summary_rows)
-    summary_df.to_csv(os.path.join(output_dir, "ensemble_summary.csv"), index=False)
+    # Save sample CSV
+    out_df = pd.DataFrame({
+        "actual_t+1": y_true_raw[:,0],
+        **{f"{name}_t+1": preds[:,0] for name, preds in zip(names, preds_components)},
+        "ensemble_t+1": final_ensemble[:,0]
+    })
+    out_df.to_csv(os.path.join(output_dir, "ensemble_predictions_sample.csv"), index=False)
 
-    # --------------------------------------------------------
-    # 8) PLOT
-    # --------------------------------------------------------
+    # Plot loss if DL trained
+    if dl_history is not None:
+        try:
+            plot_metric(dl_history.history['loss'], dl_history.history['val_loss'], f"{ticker} - {dl_choice} loss")
+        except Exception:
+            pass
 
-    plt.figure(figsize=(15,6))
-    plt.plot(y_true, label="Actual", linewidth=2)
-
-    for name, preds in zip(names_list, preds_list):
-        plt.plot(preds, label=name)
-
-    plt.plot(ensemble_pred, label="Ensemble", linewidth=3, linestyle='--', color='black')
+    # Horizon-1 line plot for quick visual
+    import matplotlib.pyplot as plt
+    plt.figure(figsize=(12,6))
+    plt.plot(y_true_raw[:,0], label="Actual (t+1)", linewidth=2)
+    for nm, comp in zip(names, preds_components):
+        plt.plot(comp[:,0], label=f"{nm} (t+1)")
+    plt.plot(final_ensemble[:,0], label="Ensemble (t+1)", linestyle="--", color="k", linewidth=2)
     plt.legend()
-    plt.title(f"Ensemble: {'+'.join(names_list)} | MSE={mse_final:.4f}")
+    plt.title(f"{ticker} Ensemble (t+1) avg_mse={best_config['avg_mse']:.4f}")
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "ensemble_prediction_plot.png"))
+    plt.savefig(os.path.join(output_dir, "ensemble_horizon1_plot.png"))
     plt.show()
 
-    # --------------------------------------------------------
-    # 9) RETURN OBJECT
-    # --------------------------------------------------------
-
     return {
-        "names": names_list,
-        "preds_list": preds_list,
-        "ensemble_pred": ensemble_pred,
-        "weights": weights_final,
-        "mse": mse_final,
-        "y_true": y_true,
-        "summary_df": summary_df
+        "names": names,
+        "preds_components": preds_components,
+        "final_ensemble": final_ensemble,
+        "y_true_raw": y_true_raw,
+        "weights": best_config["weights"],
+        "avg_mse": best_config["avg_mse"],
+        "mse_per_horizon": mse_per_horizon,
+        "dl_history": dl_history,
+        "output_dir": output_dir
     }
 
-
-
-# ------------------------------------------------------------
-# EXAMPLE RUNS
-# ------------------------------------------------------------
-
+# CLI
 if __name__ == "__main__":
-
-    # ARIMA + LSTM
-    out1 = run_ensemble(
-        ticker="NVDA",
-        model_set=["ARIMA","LSTM"],
+    out = run_ensemble(
+        ticker="NVO",
+        seq_len=60,
+        pred_steps=10,
+        model_set=["SARIMA","RF","LSTM"],
         dl_choice="LSTM",
-        weight_search=False
+        weight_search=True,
+        output_dir="output_ensemble", #specify output directory
+        dl_epochs=75,
+        dl_batch_size=32
     )
-
-    # ARIMA + LSTM (weight search ON)
-    out2 = run_ensemble(
-        ticker="NVDA",
-        model_set=["ARIMA","LSTM"],
-        dl_choice="LSTM",
-        weight_search=True
-    )
-
-    # ARIMA + RF + LSTM
-    out3 = run_ensemble(
-        ticker="NVDA",
-        model_set=["ARIMA","RF","LSTM"],
-        dl_choice="LSTM",
-        weight_search=True
-    )
+    print("Results saved to:", out["output_dir"])

@@ -126,4 +126,4 @@ if __name__ == "__main__":
     )
     
     # Visualize using candlestick chart (1 candle = 5 trade days)
-    plot_candlestick_chart(df, "NVDA", n_days=30)
+    plot_candlestick_chart(df, "NVDA", n_days=5)

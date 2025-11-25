@@ -1,0 +1,11 @@
+Ticker example list 
+(other tickers can be found at https://finance.yahoo.com, including US,Europe,Asia tickers and crypto tickers): 
+
+AMZN - Amazon
+NVDA - Nvida
+AAPL - Apple
+V - Visa
+NVO - Novo Nordisk A/S
+GRND - Gridr Inc
+ONDS - Ondas Holdings Inc
+INSP - Inspire Medical Systems, Inc

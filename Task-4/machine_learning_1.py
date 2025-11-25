@@ -72,7 +72,7 @@ def build_model(layer_configs, input_shape, output_units=1):
 
 
 #train model function
-def train_model(model, x_train, y_train, x_val, y_val, epochs=50, batch_size=32):
+def train_model(model, x_train, y_train, x_val, y_val, epochs=75, batch_size=32):
     es = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
     history = model.fit(
         x_train, y_train,
@@ -203,7 +203,7 @@ if __name__ == "__main__":
     print(f"Running Test {TEST_ID}\n")
 
     df, train_df, test_df, scaler = load_stock_data(
-        ticker="NVDA", #select company
+        ticker="AMZN", #select company
         start_date="2020-01-01", #start date
         end_date="2025-7-31", #end date
         split_by_date=True,

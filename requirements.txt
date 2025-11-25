@@ -1,0 +1,15 @@
+pandas
+yfinance
+scikit-learn
+mplfinance
+tensorflow
+numpy
+pmdarima
+pytrends
+matplotlib
+keras
+requests
+tqdm
+python-dateutil
+joblib
+statsmodels
