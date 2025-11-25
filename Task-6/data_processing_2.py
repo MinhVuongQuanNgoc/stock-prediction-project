@@ -111,4 +111,4 @@ def plot_candlestick_chart(df: pd.DataFrame, ticker: str, n_days: int = 1):
         mav=(5, 10, 20), # 5, 10, 20 days moving averages
         figsize=(10, 6), # Figure size in inches (metrics need conversion line above)
         tight_layout=True # Avoid layout overlap
-    )
+    )    
