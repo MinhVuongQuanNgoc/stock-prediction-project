@@ -148,15 +148,15 @@ def ensemble_weighted(preds_list: List[np.ndarray], weights: List[float]) -> np.
 
 
 def run_ensemble(
-    ticker: str = "NVDA",
+    ticker: str = "AMZN",
     seq_len: int = 60,
     pred_steps: int = 10,
-    model_set: List[str] = ["SARIMA", "LSTM"],
+    model_set: List[str] = ["SARIMA","RF","LSTM"],
     dl_choice: str = "LSTM",
     weight_search: bool = False,
     test_size: float = 0.2,
     start_date: str = "2020-01-01",
-    end_date: str = "2025-07-31",
+    end_date: str = "2025-08-31",
     output_dir: str = "output_ensemble",
     dl_epochs: int = 75,
     dl_batch_size: int = 32,
@@ -372,7 +372,7 @@ def run_ensemble(
 # CLI
 if __name__ == "__main__":
     out = run_ensemble(
-        ticker="NVO",
+        ticker="AMZN",
         seq_len=60,
         pred_steps=10,
         model_set=["SARIMA","RF","LSTM"],

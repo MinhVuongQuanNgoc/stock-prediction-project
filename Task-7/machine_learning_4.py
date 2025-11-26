@@ -149,7 +149,7 @@ def main(ticker: str, ensemble_dir: str, pred_steps: int = 10, keyword: str = No
 
     fig.tight_layout()
     # Zoom into last N days for better visibility
-    ZOOM_DAYS = 60 #2 months for example, expand if needed to see bigger chart
+    ZOOM_DAYS = 365 #2 months for example, expand if needed to see bigger chart
     min_zoom_date = df["Date"].max() - pd.Timedelta(days=ZOOM_DAYS)
     ax1.set_xlim(min_zoom_date, pred_df["Date"].max())
 
@@ -164,9 +164,9 @@ def main(ticker: str, ensemble_dir: str, pred_steps: int = 10, keyword: str = No
 
 if __name__ == "__main__":
     pred = main(
-        ticker="NVDA",
+        ticker="AMZN",
         ensemble_dir="output_ensemble", # specify the correct output directory from machine_learning_3.py
-        pred_steps=10,
-        keyword="NVIDIA stock" #keyword for Google Trends
+        pred_steps=14,
+        keyword="Amazon stock" #keyword for Google Trends
     )
     print(pred)

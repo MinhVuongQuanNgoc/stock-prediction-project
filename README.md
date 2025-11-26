@@ -21,7 +21,7 @@ Download the code base to the local directory
 - Download Miniconda
 - Create and active the virtual environment with python 3.9 using the Anaconda Promt
 ```
-    conda create --name [env name] python = 3.9
+    conda create --name [env name] python=3.9
 ```
 and
 ```
@@ -107,10 +107,11 @@ then
     python machine_learning_3.py
 ```
 - finally run this to get the trend overlay on top of ml3.py
-- Note: ensemble_dir must have the same name with ml3.py output directory
-- Note: change the keyword appropriately with the tick (example ticker NVDA should have the keyword "NVidia" or "NVidia Stock")
-- Note: change pred_days to predict k days ahead
-- NodeAdjust ZOOM_DAYS to change how many days back are display since the predict point (2 small or 2 big caused the chart to be loose or condensed)
+NOTE!!! ALL OF THE FOLLOWING parameter need to be the same across all files
+- ensemble_dir must have the same name with ml3.py output directory
+- the keyword appropriately with the tick (example ticker NVDA should have the keyword "NVidia" or "NVidia Stock")
+- pred_days to predict k days ahead
+- Note: NodeAdjust ZOOM_DAYS to change how many days back are display since the predict point (2 small or 2 big caused the chart to be loose or condensed)
 ```
     python machine_learning_4.py
 ```
