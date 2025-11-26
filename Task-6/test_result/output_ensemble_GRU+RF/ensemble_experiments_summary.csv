@@ -1,0 +1,2 @@
+ensemble,weights,avg_mse,type
+GRU+RF,"[1.0, 0.0]",91.58057476498632,weight_search

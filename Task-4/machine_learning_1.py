@@ -199,13 +199,13 @@ TEST_CONFIGS = {
 
 
 if __name__ == "__main__":
-    TEST_ID = 10  # Change between 1-13 to test different configurations
+    TEST_ID = 13  # Change between 1-13 to test different configurations
     print(f"Running Test {TEST_ID}\n")
 
     df, train_df, test_df, scaler = load_stock_data(
-        ticker="AMZN", #select company
+        ticker="NVDA", #select company
         start_date="2020-01-01", #start date
-        end_date="2025-8-31", #end date
+        end_date="2025-7-31", #end date
         split_by_date=True,
         test_size=0.2,
         scale=True

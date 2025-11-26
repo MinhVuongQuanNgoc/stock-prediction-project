@@ -3,7 +3,7 @@ yfinance
 scikit-learn
 mplfinance
 tensorflow
-numpy
+numpy==1.26.4
 pmdarima
 pytrends
 matplotlib

@@ -1,0 +1,2 @@
+ensemble,weights,avg_mse,type
+LSTM+RF,"[1.0, 0.0]",125.73604060704665,weight_search

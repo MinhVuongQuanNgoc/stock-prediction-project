@@ -170,15 +170,15 @@ if __name__ == "__main__":
     print("Multivariate + Multistep Forecasting")
 
     df, train_df, test_df, scaler = load_stock_data(
-        ticker="AMZN",
+        ticker="NVDA",
         start_date="2020-01-01",
-        end_date="2025-08-31",
+        end_date="2025-07-31",
         split_by_date=True,
         test_size=0.2,
         scale=True
     )
 
     feature_cols = ["Open", "High", "Low", "Close", "Adj Close", "Volume"]
-    model, preds_inv, y_test_inv, results_df = main(train_df, test_df, scaler, feature_cols, seq_len=70, pred_steps=14)
+    model, preds_inv, y_test_inv, results_df = main(train_df, test_df, scaler, feature_cols, seq_len=120, pred_steps=10)
 
     print("Produced", preds_inv.shape[0], "forecast sequences")

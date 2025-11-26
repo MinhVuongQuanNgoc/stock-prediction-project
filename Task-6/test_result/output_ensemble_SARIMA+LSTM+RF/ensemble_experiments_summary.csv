@@ -1,0 +1,2 @@
+ensemble,weights,avg_mse,type
+SARIMA+LSTM+RF,"[0.0, 1.0, 0.0]",144.89149764901353,weight_search

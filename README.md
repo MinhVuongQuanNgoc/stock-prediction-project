@@ -36,6 +36,9 @@ Open Anaconda promt and move towards the project directory and install dependenc
 ```
   pip3 install -r requirements.txt
 ```
+**Special Notice**
+- python = 3.9
+- numpy==1.26.4 (because pmdarima is incompatible with numpy 2.x)
 
 - Then open the file and choose the ticker, start date and end date, usually in the __main__ block. 
 - Tickers list can be found at ticker_list.txt

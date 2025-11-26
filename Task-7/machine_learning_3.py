@@ -151,7 +151,7 @@ def run_ensemble(
     ticker: str = "AMZN",
     seq_len: int = 60,
     pred_steps: int = 10,
-    model_set: List[str] = ["SARIMA","RF","LSTM"],
+    model_set: List[str] = ["RF","LSTM"],
     dl_choice: str = "LSTM",
     weight_search: bool = False,
     test_size: float = 0.2,
@@ -375,7 +375,7 @@ if __name__ == "__main__":
         ticker="AMZN",
         seq_len=60,
         pred_steps=14,
-        model_set=["SARIMA","RF","LSTM"],
+        model_set=["RF","LSTM"],
         dl_choice="LSTM",
         weight_search=True,
         output_dir="output_ensemble", #specify output directory

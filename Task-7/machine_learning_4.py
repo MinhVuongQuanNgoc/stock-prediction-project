@@ -149,7 +149,7 @@ def main(ticker: str, ensemble_dir: str, pred_steps: int = 10, keyword: str = No
 
     fig.tight_layout()
     # Zoom into last N days for better visibility
-    ZOOM_DAYS = 365 #2 months for example, expand if needed to see bigger chart
+    ZOOM_DAYS = 90 #2 months for example, expand if needed to see bigger chart
     min_zoom_date = df["Date"].max() - pd.Timedelta(days=ZOOM_DAYS)
     ax1.set_xlim(min_zoom_date, pred_df["Date"].max())
 

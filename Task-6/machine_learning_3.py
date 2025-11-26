@@ -27,7 +27,8 @@ from sklearn.preprocessing import MinMaxScaler
 try:
     import pmdarima as pm
     PM_AVAILABLE = True
-except Exception:
+except Exception as e:
+    print("Failed to import pmdarima:", e)
     PM_AVAILABLE = False
 
 from data_processing_2 import load_stock_data
@@ -148,15 +149,15 @@ def ensemble_weighted(preds_list: List[np.ndarray], weights: List[float]) -> np.
 
 
 def run_ensemble(
-    ticker: str = "AMZN",
+    ticker: str = "NVDA",
     seq_len: int = 60,
     pred_steps: int = 10,
-    model_set: List[str] = ["SARIMA","RF","LSTM"],
-    dl_choice: str = "LSTM",
+    model_set: List[str] = ["RF","GRU"],
+    dl_choice: str = "GRU",
     weight_search: bool = False,
     test_size: float = 0.2,
     start_date: str = "2020-01-01",
-    end_date: str = "2025-08-31",
+    end_date: str = "2025-07-31",
     output_dir: str = "output_ensemble",
     dl_epochs: int = 75,
     dl_batch_size: int = 32,
@@ -372,11 +373,11 @@ def run_ensemble(
 # CLI
 if __name__ == "__main__":
     out = run_ensemble(
-        ticker="AMZN",
+        ticker="NVDA",
         seq_len=60,
         pred_steps=10,
-        model_set=["SARIMA","RF","LSTM"],
-        dl_choice="LSTM",
+        model_set=["RF","GRU"],
+        dl_choice="GRU",
         weight_search=True,
         output_dir="output_ensemble", #specify output directory
         dl_epochs=75,
